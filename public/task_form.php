@@ -12,8 +12,9 @@ if ($id) {
     if (!$existing) { http_response_code(404); exit('Tarefa não encontrada.'); }
     $task=array_merge($task,$existing);
     $task['due_at']=substr(str_replace(' ','T',$existing['due_at']),0,16);
-    $selected=array_map('intval',tf2_sql('SELECT user_id FROM task_assignees WHERE task_id=?',[$id])->fetchAll(PDO::FETCH_COLUMN));
-    $departments=tf2_sql('SELECT DISTINCT u.department FROM users u JOIN task_assignees a ON a.user_id=u.id WHERE a.task_id=?',[$id])->fetchAll(PDO::FETCH_COLUMN);
+    $assigned=tf2_sql('SELECT u.id,u.department FROM users u JOIN task_assignees a ON a.user_id=u.id WHERE a.task_id=?',[$id])->fetchAll();
+    $selected=array_map('intval',array_column($assigned,'id'));
+    $departments=array_values(array_unique(array_column($assigned,'department')));
     if (count($departments)===1) $task['department']=$departments[0];
 }
 if ($isPost) {
@@ -31,7 +32,7 @@ if ($isPost) {
 $users=tf2_sql('SELECT id,name,department FROM users ORDER BY name,id')->fetchAll();
 $groups=tf2_sql('SELECT id,name,department FROM `groups` ORDER BY name,id')->fetchAll();
 $parents=tf2_sql('SELECT id,title FROM tasks ORDER BY title,id')->fetchAll();
-$departmentOptions=[]; foreach ($users as $member) if ($member['department']!=='') $departmentOptions[$member['department']]=$member['department'];
+$departmentOptions=tf2_departments(array_column($users,'department'));
 ksort($departmentOptions);
 page_start($id ? 'Editar tarefa' : 'Nova tarefa'); tf2_nav(true);
 ?>
@@ -43,19 +44,16 @@ page_start($id ? 'Editar tarefa' : 'Nova tarefa'); tf2_nav(true);
 <label class="full">Título<input name="title" maxlength="200" required value="<?= h($task['title']) ?>"></label>
 <label class="full">Descrição<textarea name="description" maxlength="15000" rows="5"><?= h($task['description']) ?></textarea></label>
 <label>Tarefa principal<select name="parent_id"><option value="">Nenhuma</option>
-<?php foreach ($parents as $parent): if ((int)$parent['id']===$id) continue; ?>
-<option value="<?= h((string)$parent['id']) ?>" <?= (string)$task['parent_id']===(string)$parent['id'] ? 'selected' : '' ?>><?= h($parent['title']) ?></option>
-<?php endforeach ?></select></label>
+<?php tf2_options(array_column(array_filter($parents,static fn($parent)=>(int)$parent['id']!==$id),'title','id'),(string)$task['parent_id']); ?>
+</select></label>
 <label>Tipo<select name="type"><?php tf2_options(['individual'=>'Individual','group'=>'Em grupo ou setor'],$task['type']); ?></select></label>
 <label>Grupo<select name="group_id"><option value="">Sem grupo — usar setor</option>
-<?php foreach ($groups as $group): ?>
-<option value="<?= h((string)$group['id']) ?>" <?= (string)$task['group_id']===(string)$group['id'] ? 'selected' : '' ?>><?= h($group['name'].' — '.$group['department']) ?></option>
-<?php endforeach ?></select></label>
+<?php tf2_options(array_combine(array_column($groups,'id'),array_map(static fn($row)=>$row['name'].' — '.$row['department'],$groups)),(string)$task['group_id']); ?>
+</select></label>
 <label>Setor, quando não houver grupo<select name="department"><option value="">Selecione</option><?php tf2_options($departmentOptions,$task['department']); ?></select></label>
 <label class="full">Responsáveis<select name="assignees[]" multiple required size="6">
-<?php foreach ($users as $member): ?>
-<option value="<?= h((string)$member['id']) ?>" <?= in_array((int)$member['id'],$selected,true) ? 'selected' : '' ?>><?= h($member['name'].' — '.$member['department']) ?></option>
-<?php endforeach ?></select></label>
+<?php tf2_options(array_combine(array_column($users,'id'),array_map(static fn($row)=>$row['name'].' — '.$row['department'],$users)),$selected); ?>
+</select></label>
 <p class="help full">Individual: selecione uma pessoa. Em grupo ou setor: selecione uma ou mais pessoas. Use Ctrl ou Command para selecionar várias pessoas no computador. O servidor verifica os vínculos.</p>
 <label>Categoria<input name="category" maxlength="100" value="<?= h($task['category']) ?>"></label>
 <label>Prioridade<select name="priority"><?php tf2_options(tf2_priorities(),$task['priority']); ?></select></label>

@@ -23,23 +23,39 @@ if ($deleteId=tf2_id($_GET['delete'] ?? null)) {
     if (!$deleteTask) { http_response_code(404); $messages[]='Tarefa não encontrada.'; }
 }
 $users=tf2_sql('SELECT id,name FROM users ORDER BY name,id')->fetchAll();
-$departments=[];
+$departmentNames=[];
+// Consultas separadas evitam UNION entre collations diferentes.
 foreach (['SELECT DISTINCT department FROM users', 'SELECT DISTINCT department FROM `groups`'] as $sql) {
-    foreach (tf2_sql($sql)->fetchAll(PDO::FETCH_COLUMN) as $department) if ($department!=='') $departments[$department]=$department;
+    $departmentNames=array_merge($departmentNames,tf2_sql($sql)->fetchAll(PDO::FETCH_COLUMN));
 }
+$departments=tf2_departments($departmentNames);
 ksort($departments);
-$values=[]; foreach (['assignee','department','status','priority','from','to'] as $key) $values[$key]=tf2_text($_GET,$key);
-$filters=$values; $filters['assignee']=tf2_id($values['assignee']);
-if ($values['assignee']!=='' && !$filters['assignee']) $messages[]='Responsável inválido.';
 $statuses=tf2_statuses(); $priorities=tf2_priorities();
-if ($values['status']!=='' && $values['status']!=='atrasada' && !isset($statuses[$values['status']])) $messages[]='Estado inválido.';
-if ($values['priority']!=='' && !isset($priorities[$values['priority']])) $messages[]='Prioridade inválida.';
-foreach (['from','to'] as $key) {
-    if ($values[$key]!=='') {
-        $filters[$key]=tf2_date($values[$key]);
-        if (!$filters[$key]) $messages[]='Informe datas válidas nos filtros de prazo.';
+$values=[]; $filters=[];
+foreach (['assignee','department','status','priority','from','to'] as $key) {
+    $values[$key]=tf2_text($_GET,$key);
+    $filters[$key]=$values[$key];
+    switch ($key) {
+        case 'assignee':
+            $filters[$key]=tf2_id($values[$key]);
+            if ($values[$key]!=='' && !$filters[$key]) $messages[]='Responsável inválido.';
+            break;
+        case 'status':
+            if ($values[$key]!=='' && $values[$key]!=='atrasada' && !isset($statuses[$values[$key]])) $messages[]='Estado inválido.';
+            break;
+        case 'priority':
+            if ($values[$key]!=='' && !isset($priorities[$values[$key]])) $messages[]='Prioridade inválida.';
+            break;
+        case 'from':
+        case 'to':
+            if ($values[$key]!=='') {
+                $filters[$key]=tf2_date($values[$key]);
+                if (!$filters[$key]) $messages[]='Informe datas válidas nos filtros de prazo.';
+            }
+            break;
     }
 }
+// UTC: inclui todos os segundos do minuto final informado.
 if ($filters['to']) $filters['to']=substr($filters['to'],0,16).':59';
 if ($filters['from'] && $filters['to'] && $filters['from']>$filters['to']) $messages[]='O início do prazo deve ser anterior ao fim.';
 $tasks=$messages ? [] : tf2_list($filters);
@@ -58,13 +74,14 @@ page_start('Gerenciar tarefas'); tf2_nav(true);
 <?php endif ?>
 <form method="get" action="manage.php" class="card grid-form">
 <label>Responsável<select name="assignee"><option value="">Todos</option>
-<?php foreach ($users as $member): ?><option value="<?= h((string)$member['id']) ?>" <?= $values['assignee']===(string)$member['id'] ? 'selected' : '' ?>><?= h($member['name']) ?></option><?php endforeach ?>
+<?php tf2_options(array_column($users,'name','id'),$values['assignee']); ?>
 </select></label>
 <label>Setor<select name="department"><option value="">Todos</option><?php tf2_options($departments,$values['department']); ?></select></label>
 <label>Estado<select name="status"><option value="">Todos</option><?php tf2_options($statuses+['atrasada'=>'Atrasada'],$values['status']); ?></select></label>
 <label>Prioridade<select name="priority"><option value="">Todas</option><?php tf2_options($priorities,$values['priority']); ?></select></label>
-<label>Prazo a partir de — UTC<input type="datetime-local" name="from" value="<?= h($values['from']) ?>"></label>
-<label>Prazo até — UTC<input type="datetime-local" name="to" value="<?= h($values['to']) ?>"></label>
+<?php foreach (['from'=>'Prazo a partir de — UTC','to'=>'Prazo até — UTC'] as $key=>$label): ?>
+<label><?= h($label) ?><input type="datetime-local" name="<?= h($key) ?>" value="<?= h($values[$key]) ?>"></label>
+<?php endforeach ?>
 <div class="full"><button class="button inline" type="submit">Filtrar</button> <a href="manage.php">Limpar filtros</a></div>
 </form>
 <?php if (!$messages && !$tasks): ?><p>Nenhuma tarefa encontrada.</p><?php endif ?>

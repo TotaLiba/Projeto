@@ -298,11 +298,17 @@ function tf2_date(string $value): ?string
     return $date && $date->format('Y-m-d\TH:i') === $value ? $date->format('Y-m-d H:i:s') : null;
 }
 
-function tf2_options(array $options, string $selected): void
+function tf2_options(array $options, string|array $selected): void
 {
+    $selected=array_map('strval', (array)$selected);
     foreach ($options as $value=>$label) {
-        echo '<option value="'.h((string)$value).'"'.((string)$value === $selected ? ' selected' : '').'>'.h((string)$label).'</option>';
+        echo '<option value="'.h((string)$value).'"'.(in_array((string)$value,$selected,true) ? ' selected' : '').'>'.h((string)$label).'</option>';
     }
+}
+
+function tf2_departments(array $departments): array
+{
+    return array_filter(array_combine($departments,$departments), static fn($value)=>$value!=='');
 }
 
 function tf2_nav(bool $manager): void
