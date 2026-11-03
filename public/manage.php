@@ -40,7 +40,7 @@ foreach (['from','to'] as $key) {
         if (!$filters[$key]) $messages[]='Informe datas válidas nos filtros de prazo.';
     }
 }
-if ($filters['to']) $filters['to']=substr($filters['to'],0,17).'59';
+if ($filters['to']) $filters['to']=substr($filters['to'],0,16).':59';
 if ($filters['from'] && $filters['to'] && $filters['from']>$filters['to']) $messages[]='O início do prazo deve ser anterior ao fim.';
 $tasks=$messages ? [] : tf2_list($filters);
 page_start('Gerenciar tarefas'); tf2_nav(true);
