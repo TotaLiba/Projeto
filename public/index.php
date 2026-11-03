@@ -11,5 +11,5 @@ page_start('Visão geral');
 <dt>Cargo</dt><dd><?= h($user['job_title']) ?></dd><dt>Setor</dt><dd><?= h($user['department']) ?></dd>
 <dt>Perfil</dt><dd><?= $user['role'] === 'gestor' ? 'Gestor' : 'Funcionário' ?></dd>
 </dl><?php if ($user['role'] === 'gestor'): ?><a class="button inline" href="users.php">Gerenciar usuários</a><?php endif ?></section>
-<p class="muted">O módulo de tarefas será disponibilizado na próxima fase.</p>
+<?php tf2_nav($user['role'] === 'gestor'); ?>
 <?php page_end(); ?>

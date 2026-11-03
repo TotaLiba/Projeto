@@ -244,7 +244,7 @@ function page_start(string $title): void
 </nav><div class="sidebar-footer">
 <?php if ($user): ?><strong><?= h($user['name']) ?></strong><span><?= $user['role'] === 'gestor' ? 'Gestor' : 'Funcionário' ?></span>
 <form action="logout.php" method="post"><?php csrf_field(); ?><button class="button secondary" type="submit">Sair da conta</button></form>
-<?php else: ?><span>TaskFlow · Fase 1</span><?php endif ?>
+<?php else: ?><span>TaskFlow</span><?php endif ?>
 </div></aside><main><div class="content">
 <?php if (isset($_SESSION['flash'])): ?><p class="notice" role="status"><?= h($_SESSION['flash']) ?></p><?php unset($_SESSION['flash']); endif ?>
 <?php
@@ -261,4 +261,155 @@ function errors(array $errors): void
     echo '<div class="alert" role="alert"><ul>';
     foreach ($errors as $error) echo '<li>' . h($error) . '</li>';
     echo '</ul></div>';
+}
+
+// Fase 2: helpers exclusivos do módulo de tarefas.
+function tf2_sql(string $sql, array $params = []): PDOStatement
+{
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt;
+}
+
+function tf2_statuses(): array
+{
+    return ['pendente'=>'Pendente', 'em_andamento'=>'Em andamento', 'concluida'=>'Concluída'];
+}
+
+function tf2_priorities(): array
+{
+    return ['baixa'=>'Baixa', 'media'=>'Média', 'alta'=>'Alta', 'urgente'=>'Urgente'];
+}
+
+function tf2_text(array $source, string $key): string
+{
+    return is_string($source[$key] ?? null) ? trim($source[$key]) : '';
+}
+
+function tf2_id(mixed $value): int
+{
+    if (!is_string($value) && !is_int($value)) return 0;
+    return (int) (filter_var($value, FILTER_VALIDATE_INT, ['options'=>['min_range'=>1]]) ?: 0);
+}
+
+function tf2_date(string $value): ?string
+{
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $value, new DateTimeZone('UTC'));
+    return $date && $date->format('Y-m-d\TH:i') === $value ? $date->format('Y-m-d H:i:s') : null;
+}
+
+function tf2_options(array $options, string $selected): void
+{
+    foreach ($options as $value=>$label) {
+        echo '<option value="'.h((string)$value).'"'.((string)$value === $selected ? ' selected' : '').'>'.h((string)$label).'</option>';
+    }
+}
+
+function tf2_nav(bool $manager): void
+{
+    echo '<nav aria-label="Tarefas"><a href="tasks.php">Minhas tarefas</a>';
+    if ($manager) echo ' · <a href="manage.php">Gerenciar tarefas</a> · <a href="task_form.php">Nova tarefa</a>';
+    echo '</nav>';
+}
+
+function tf2_list(array $filters = [], ?int $userId = null): array
+{
+    $where = []; $params = [];
+    foreach ([$userId, $filters['assignee'] ?? null] as $assigned) {
+        if ($assigned) {
+            $where[] = 'EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id=t.id AND a.user_id=?)';
+            $params[] = $assigned;
+        }
+    }
+    if (!empty($filters['department'])) {
+        $where[] = '(g.department=? OR EXISTS (SELECT 1 FROM task_assignees a JOIN users u ON u.id=a.user_id WHERE a.task_id=t.id AND u.department=?))';
+        $params[] = $filters['department']; $params[] = $filters['department'];
+    }
+    if (!empty($filters['status'])) {
+        if ($filters['status'] === 'atrasada') $where[] = "t.due_at<UTC_TIMESTAMP() AND t.status<>'concluida'";
+        else { $where[] = 't.status=?'; $params[] = $filters['status']; }
+    }
+    foreach (['priority'=>'t.priority = ?', 'from'=>'t.due_at >= ?', 'to'=>'t.due_at <= ?'] as $key=>$clause) {
+        if (!empty($filters[$key])) { $where[]=$clause; $params[]=$filters[$key]; }
+    }
+    $sql = "SELECT t.*, g.name AS group_name, p.title AS parent_title,
+        (t.due_at<UTC_TIMESTAMP() AND t.status<>'concluida') AS overdue,
+        (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM task_assignees a JOIN users u ON u.id=a.user_id WHERE a.task_id=t.id) AS assignee_names
+        FROM tasks t LEFT JOIN `groups` g ON g.id=t.group_id LEFT JOIN tasks p ON p.id=t.parent_id";
+    if ($where) $sql .= ' WHERE '.implode(' AND ', $where);
+    return tf2_sql($sql." ORDER BY (t.status<>'concluida') DESC, t.due_at, t.id", $params)->fetchAll();
+}
+
+function tf2_status_form(array $task): void
+{
+    echo '<form method="post" action="task_status.php">';
+    csrf_field();
+    echo '<input type="hidden" name="id" value="'.h((string)$task['id']).'"><label>Estado<select name="status">';
+    tf2_options(tf2_statuses(), $task['status']);
+    echo '</select></label><button class="button inline" type="submit">Atualizar estado</button></form>';
+}
+
+function tf2_save(array $input, int $creatorId, int $id = 0): int
+{
+    $title=tf2_text($input,'title'); $description=tf2_text($input,'description');
+    $category=tf2_text($input,'category'); $type=tf2_text($input,'type');
+    $priority=tf2_text($input,'priority'); $status=tf2_text($input,'status');
+    $department=tf2_text($input,'department');
+    $parent=tf2_id($input['parent_id'] ?? null) ?: null;
+    $group=tf2_id($input['group_id'] ?? null) ?: null;
+    $due=tf2_date(tf2_text($input,'due_at'));
+    // Conta caracteres UTF-8 sem adicionar uma dependência de mbstring à Fase 1.
+    $titleLength=preg_match_all('/./us', $title);
+    $categoryLength=preg_match_all('/./us', $category);
+    if ($title === '' || $titleLength === false || $titleLength > 200) throw new InvalidArgumentException('Informe um título válido com até 200 caracteres.');
+    if ($categoryLength === false || $categoryLength > 100 || strlen($description)>60000 || !preg_match('//u', $description)) throw new InvalidArgumentException('Categoria ou descrição inválida ou muito longa.');
+    if (!in_array($type,['individual','group'],true) || !isset(tf2_priorities()[$priority]) || !isset(tf2_statuses()[$status])) throw new InvalidArgumentException('Tipo, prioridade ou estado inválido.');
+    if (!$due) throw new InvalidArgumentException('Informe data e hora válidas em UTC.');
+    if (!is_array($input['assignees'] ?? null)) throw new InvalidArgumentException('Selecione os responsáveis.');
+    $assignees=[];
+    foreach ($input['assignees'] as $value) {
+        $uid=tf2_id($value);
+        if (!$uid) throw new InvalidArgumentException('Responsável inválido.');
+        $assignees[$uid]=$uid;
+    }
+    $assignees=array_values($assignees);
+    if (!$assignees || count($assignees)>500) throw new InvalidArgumentException('Selecione entre 1 e 500 responsáveis.');
+    if ($type==='individual') {
+        if (count($assignees)!==1) throw new InvalidArgumentException('Selecione exatamente um responsável para a tarefa individual.');
+        $group=null;
+    } elseif (!$group && $department==='') throw new InvalidArgumentException('Selecione um grupo ou setor.');
+    $pdo=db(); $pdo->beginTransaction();
+    try {
+        $parents=[];
+        foreach (tf2_sql('SELECT id,parent_id FROM tasks ORDER BY id FOR UPDATE')->fetchAll() as $row) $parents[(int)$row['id']]=$row['parent_id']===null ? null : (int)$row['parent_id'];
+        if ($id && !array_key_exists($id,$parents)) throw new InvalidArgumentException('Tarefa não encontrada.');
+        if ($parent!==null && !array_key_exists($parent,$parents)) throw new InvalidArgumentException('Tarefa principal não encontrada.');
+        $cursor=$parent; $seen=[];
+        while ($cursor!==null) {
+            if (($id && $cursor===$id) || isset($seen[$cursor])) throw new InvalidArgumentException('A tarefa principal criaria um ciclo de subtarefas.');
+            $seen[$cursor]=true; $cursor=$parents[$cursor] ?? null;
+        }
+        $marks=implode(',',array_fill(0,count($assignees),'?'));
+        $users=tf2_sql("SELECT id,department FROM users WHERE id IN ($marks)",$assignees)->fetchAll();
+        if (count($users)!==count($assignees)) throw new InvalidArgumentException('Responsável não encontrado.');
+        if ($type==='group' && $group) {
+            $members=tf2_sql("SELECT user_id FROM group_members WHERE group_id=? AND user_id IN ($marks)",array_merge([$group],$assignees))->fetchAll(PDO::FETCH_COLUMN);
+            if (count($members)!==count($assignees)) throw new InvalidArgumentException('Os responsáveis devem ser membros do grupo selecionado.');
+        } elseif ($type==='group') {
+            foreach ($users as $member) if ($member['department']!==$department) throw new InvalidArgumentException('Os responsáveis devem pertencer ao setor selecionado.');
+        }
+        $values=[$title,$description,$parent,$type,$group,$category,$priority,$due,$status,$status];
+        if ($id) {
+            tf2_sql("UPDATE tasks SET title=?,description=?,parent_id=?,type=?,group_id=?,category=?,priority=?,due_at=?,completed_at=CASE WHEN ?<>'concluida' THEN NULL WHEN completed_at IS NULL THEN UTC_TIMESTAMP() ELSE completed_at END,status=?,updated_at=UTC_TIMESTAMP() WHERE id=?",array_merge($values,[$id]));
+            tf2_sql('DELETE FROM task_assignees WHERE task_id=?',[$id]);
+        } else {
+            tf2_sql("INSERT INTO tasks (title,description,parent_id,type,group_id,category,priority,due_at,completed_at,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,CASE WHEN ?='concluida' THEN UTC_TIMESTAMP() ELSE NULL END,?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())",array_merge($values,[$creatorId]));
+            $id=(int)$pdo->lastInsertId();
+        }
+        foreach ($assignees as $uid) tf2_sql('INSERT INTO task_assignees (task_id,user_id) VALUES (?,?)',[$id,$uid]);
+        $pdo->commit(); return $id;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
 }

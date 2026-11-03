@@ -1,6 +1,6 @@
-# TaskFlow · Fase 1
+# TaskFlow
 
-Sistema de acesso e gestão de usuários em PHP puro, HTML, CSS e JavaScript. Sem Composer, npm ou frameworks. O módulo de tarefas não está implementado.
+Sistema de acesso e gestão de usuários em PHP puro, HTML, CSS e JavaScript. Sem Composer, npm ou frameworks. A Fase 2 adiciona a gestão de tarefas; consulte [FASE2.md](FASE2.md) para aplicar a migração sem apagar o banco e ver as mudanças por arquivo.
 
 ## Estrutura
 
@@ -143,4 +143,4 @@ Implementado nesta fase: estrutura, SQL, conexão PDO, primeiro gestor por CLI, 
 
 A configuração local da conexão, da chave, do remetente e do transporte SMTP é necessária em cada instalação. Não há contas, chaves ou credenciais de produção incluídas.
 
-Para as próximas fases: módulo de tarefas; edição/desativação de usuários e perfis mais detalhados, caso necessários. Para exposição pública: limitação persistente de tentativas e monitoramento operacional. Nenhum módulo de tarefas foi antecipado.
+A Fase 2 implementa o módulo de tarefas descrito em [FASE2.md](FASE2.md). Para as próximas fases: edição/desativação de usuários e perfis mais detalhados, caso necessários. Para exposição pública: limitação persistente de tentativas e monitoramento operacional. Comentários, anexos, notificações, relatórios e calendário permanecem fora do escopo.
