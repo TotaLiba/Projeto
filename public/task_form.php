@@ -18,7 +18,7 @@ if ($id) {
 }
 if ($isPost) {
     foreach (['title','description','parent_id','type','group_id','category','priority','status','due_at','department'] as $key) $task[$key]=post($key);
-    $selected=is_array($_POST['assignees'] ?? null) ? array_map('tf2_id',$_POST['assignees']) : [];
+    $selected=is_array($_POST['assignees'] ?? null) ? array_filter(array_map('tf2_id',$_POST['assignees'])) : [];
     try {
         tf2_save($_POST,(int)$user['id'],$id);
         redirect('manage.php');
